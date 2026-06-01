@@ -1,0 +1,43 @@
+{
+  "name": "@zithara/api-telemetry-lib",
+  "version": "1.0.0",
+  "description": "Reusable API call logging and telemetry utilities for Node.js backend services",
+  "main": "src/index.js",
+  "exports": {
+    ".": {
+      "require": "./src/index.js"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "lint": "eslint src --max-warnings 0",
+    "lint:fix": "eslint src --fix",
+    "format": "prettier --write \"src/**/*.js\" \"*.md\" \"*.json\"",
+    "format:check": "prettier --check \"src/**/*.js\" \"*.md\" \"*.json\"",
+    "test": "jest test --runInBand",
+    "test:unit": "jest test --runInBand"
+  },
+  "keywords": [
+    "telemetry",
+    "observability",
+    "api-logging",
+    "tracing",
+    "postgresql"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "joi": "^17.13.3",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^9.1.0",
+    "jest": "^29.7.0",
+    "prettier": "^3.4.2"
+  }
+}

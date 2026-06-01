@@ -10,7 +10,7 @@
 const { logApiCall } = require('./services/api-call-log.service');
 const { searchApiCallLogs } = require('./search/service');
 const { validateSearchPayload } = require('./search/validate-payload');
-const { initializeApiTelemetry, isApiTelemetryInitialized } = require('./runtime/initialize');
+const { initializeApiTelemetry } = require('./runtime/initialize');
 const {
   buildRequestSnapshot,
   buildResponseSnapshot,
@@ -36,7 +36,6 @@ module.exports = {
   searchApiCallLogs,
   validateSearchPayload,
   initializeApiTelemetry,
-  isApiTelemetryInitialized,
   buildRequestSnapshot,
   buildResponseSnapshot,
   buildResponseSnapshotFromSuccess,

@@ -14,7 +14,7 @@ src/runtime/initialize.js
     └─ setExternalPool | setExternalQuery [+ setExternalRunInTransaction]
            ↓
     src/db/postgres.js module-level variables
-    (externalPool | externalQuery + externalRunInTransaction | ownedPool lazy)
+    (externalPool | externalQuery + externalRunInTransaction)
            ↓
     initialized = true  (initialize.js only; not checked on read/write paths)
 
@@ -47,7 +47,7 @@ insertApiCallLog(record)  (src/repositories/api-call-log.repository.js)
     ↓
 query(INSERT_SQL, params)  (src/db/postgres.js)
     ├─ [query mode] externalQuery(text, params)
-    └─ [pool mode]  getPool().query(text, params)  OR ownedPool.query
+    └─ [pool mode]  getPool().query(text, params)
            ↓
     PostgreSQL
 ```
@@ -135,7 +135,7 @@ Returned value is only `{ logApiCall, searchApiCallLogs }` — not a handle to D
 Re-exported from `src/index.js`:
 
 ```13:13:api-telemetry-temp/src/index.js
-const { initializeApiTelemetry, isApiTelemetryInitialized } = require('./runtime/initialize');
+const { initializeApiTelemetry } = require('./runtime/initialize');
 ```
 
 ---
@@ -147,14 +147,12 @@ const { initializeApiTelemetry, isApiTelemetryInitialized } = require('./runtime
 | State | Module | Variable(s) |
 |-------|--------|-------------|
 | “Was init called?” | `src/runtime/initialize.js` | `let initialized = false` |
-| DB access mode | `src/db/postgres.js` | `externalPool`, `externalQuery`, `externalRunInTransaction`, `ownedPool` |
+| DB access mode | `src/db/postgres.js` | `externalPool`, `externalQuery`, `externalRunInTransaction` |
 
 ### `postgres.js` module-level storage
 
 ```12:26:api-telemetry-temp/src/db/postgres.js
 /** @type {import('pg').Pool | null} */
-let ownedPool = null;
-
 /** @type {import('pg').Pool | null} */
 let externalPool = null;
 
@@ -175,7 +173,7 @@ There is no `getRuntime()`, `getDb()`, or passed context object.
 
 ### Module-scoped singleton?
 
-**Yes.** One copy of `postgres.js` and `initialize.js` per process. All consumers share the same `externalPool` / `externalQuery` / `externalRunInTransaction` / `ownedPool` values.
+**Yes.** One copy of `postgres.js` and `initialize.js` per process. All consumers share the same `externalPool` / `externalQuery` / `externalRunInTransaction` values.
 
 ### Setter side effects (mode switching)
 
@@ -223,10 +221,9 @@ options = { pool, query, runInTransaction }
           → setExternalRunInTransaction(runInTransaction)
 
 4. ELSE (no pool, no query)
-     → no postgres setters
-     → lazy ownedPool on first getPool() / query() if env configured
+     → throw ConfigurationError (initRequiresPoolOrQuery)
 
-5. ALWAYS: initialized = true
+5. ALWAYS: initialized = true (only after steps 2–3 succeed)
 ```
 
 ### Mode persistence (implicit, not a stored enum)
@@ -238,7 +235,7 @@ The library does not store `"mode": "pool" | "query"`. Mode is inferred at runti
 | `{ pool }` | host Pool | `null` | `null` | `getPool().query` | `getPool().connect()` + BEGIN/COMMIT |
 | `{ query, runInTransaction }` | `null` | host fn | host fn | `externalQuery(...)` | `externalRunInTransaction(...)` |
 | `{ query }` only | `null` | host fn | unchanged / `null` | `externalQuery(...)` | `getPool()` or error if no connect |
-| `{}` / omitted | `null` | `null` | `null` | lazy `ownedPool` | lazy `ownedPool.connect()` |
+| omitted / invalid | — | — | — | init throws | init throws |
 
 ### Example host wiring (admin panel — outside package, for reference)
 
@@ -261,8 +258,6 @@ with Sequelize-backed `query` and `runInTransaction` built in that file (not par
 | `query()` | `postgres.js` | `externalQuery`, else `getPool()` → `pool.query` |
 | `runInTransaction()` | `postgres.js` | `externalRunInTransaction`, else `getPool().connect()` |
 | `getPool()` | `postgres.js` | `externalPool`, else creates `ownedPool` |
-| `isApiTelemetryInitialized()` | `initialize.js` | `initialized` boolean only |
-
 ### Call chains that reach runtime
 
 **Write**
@@ -282,7 +277,9 @@ searchApiCallLogs
       → postgres.runInTransaction
 ```
 
-`searchApiCallLogs` and `logApiCall` do **not** call `isApiTelemetryInitialized()` before running.
+---
+
+Second call to `initializeApiTelemetry` throws `ConfigurationError` before any postgres setter runs.
 
 ---
 
@@ -417,40 +414,20 @@ The normalization layer is **`src/db/postgres.js`** with two exported primitives
 | `query(text, params)` | Write (`insertApiCallLog`) | `externalQuery` **or** `pool.query` |
 | `runInTransaction(callback)` | Search (`withStatementTimeout`) | `externalRunInTransaction` **or** `pool.connect` + BEGIN/COMMIT |
 
-### Lazy third path (no `initializeApiTelemetry` args)
-
-```62:88:api-telemetry-temp/src/db/postgres.js
-function getPool() {
-  if (externalPool) {
-    return externalPool;
-  }
-
-  if (!ownedPool) {
-    const config = getPoolConfig();
-    // throws ConfigurationError if no connection config
-    ownedPool = new Pool(config);
-    // ...
-  }
-
-  return ownedPool;
-}
-```
-
-`getPoolConfig()` lives in `src/config/index.js` (env: `DATABASE_URL`, `POSTGRES_URI`, `PGDATABASE`, etc.).
-
 ### Exported surface from `postgres.js`
 
-```153:161:api-telemetry-temp/src/db/postgres.js
+```javascript
 module.exports = {
   query,
   getPool,
-  closePool,
   runInTransaction,
   setExternalPool,
   setExternalQuery,
   setExternalRunInTransaction,
 };
 ```
+
+`getPool()` returns `externalPool` or throws if the library was initialized in query-only mode.
 
 Setters are only called from `initialize.js` (and tests that import setters directly).
 
@@ -502,7 +479,7 @@ Search requires a transactional session so `SET LOCAL statement_timeout` applies
 
 ### What is remembered
 
-1. **`initialized === true`** in `initialize.js` — exposed via `isApiTelemetryInitialized()`; not consulted by search/write.
+1. **`initialized === true`** in `initialize.js` (internal only; not exported).
 2. **Implicit DB mode** via non-null module variables in `postgres.js`.
 
 ### There is no runtime object shape
@@ -525,7 +502,6 @@ initialized === true
 externalPool === pgPool
 externalQuery === null
 externalRunInTransaction === null
-ownedPool === null  // unless previously created; not cleared by setExternalPool
 ```
 
 **After `initializeApiTelemetry({ query: fn, runInTransaction: txFn })`:**
@@ -536,19 +512,6 @@ initialized === true
 externalPool === null
 externalQuery === fn
 externalRunInTransaction === txFn
-ownedPool === null
-```
-
-**After `initializeApiTelemetry()` with no options (if env has DB URL):**
-
-```js
-initialized === true
-
-externalPool === null
-externalQuery === null
-externalRunInTransaction === null
-// first query() or runInTransaction() may set:
-ownedPool === new Pool(getPoolConfig())
 ```
 
 ---
@@ -602,6 +565,6 @@ ownedPool === new Pool(getPoolConfig())
 
 ## Facts that are not in the code
 
-- No check that `initializeApiTelemetry` was called before `searchApiCallLogs` / `logApiCall`.
+- No check that `initializeApiTelemetry` was called before `searchApiCallLogs` / `logApiCall` (DB calls fail via `postgres.query` / `runInTransaction` if not wired).
 - No stored reference to the original `options` object after init returns.
-- `isApiTelemetryInitialized()` is exported but unused inside the package (grep shows only `index.js` and `initialize.js`).
+- No library-owned lazy pool; hosts must pass `{ pool }` or `{ query }` at init.

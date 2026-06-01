@@ -34,7 +34,8 @@ const ensureDependency = (name, value) => {
  * - `pool` — native `pg` Pool with `.connect()` (campaign-backend style)
  * - `query` + `runInTransaction` — host SQL wrapper (Sequelize / admin-panel style)
  *
- * If neither is provided, the library lazily creates its own pool from env on first use.
+ * Must be called exactly once per process with `{ pool }` or `{ query }` (+ `runInTransaction` for Sequelize).
+ * A second call throws {@link ConfigurationError}.
  *
  * @param {object} [options]
  * @param {import('pg').Pool} [options.pool]
@@ -43,10 +44,18 @@ const ensureDependency = (name, value) => {
  * @returns {{ logApiCall: typeof logApiCall, searchApiCallLogs: typeof searchApiCallLogs }}
  */
 const initializeApiTelemetry = (options = {}) => {
+  if (initialized) {
+    throw new ConfigurationError(MESSAGES.db.alreadyInitialized());
+  }
+
   const { pool, query, runInTransaction } = options;
 
   if (pool && query) {
     throw new ConfigurationError(MESSAGES.db.initPoolOrQuery());
+  }
+
+  if (!pool && !query) {
+    throw new ConfigurationError(MESSAGES.db.initRequiresPoolOrQuery());
   }
 
   if (pool) {
@@ -66,12 +75,6 @@ const initializeApiTelemetry = (options = {}) => {
   return { logApiCall, searchApiCallLogs };
 };
 
-/**
- * @returns {boolean}
- */
-const isApiTelemetryInitialized = () => initialized;
-
 module.exports = {
   initializeApiTelemetry,
-  isApiTelemetryInitialized,
 };

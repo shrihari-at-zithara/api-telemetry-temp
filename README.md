@@ -22,7 +22,6 @@ Used by campaign-backend (writes), admin-panel-backend (search UI), and other se
 | Read | `searchApiCallLogs(body)` | Filtered, keyset-paginated search with guardrails |
 | Validate only | `validateSearchPayload(body)` | Joi validation for custom HTTP handlers |
 | Snapshots | `buildRequestSnapshot`, `buildResponseSnapshot*`, `buildRequestSnapshotFromAxiosConfig` | Build redacted JSONB for request/response capture |
-| State | `isApiTelemetryInitialized()` | Whether bootstrap ran |
 | Config | `telemetryConfig`, `TELEMETRY_DEFAULTS` | Runtime limits |
 | Errors | `SearchValidationError`, `GuardrailError`, `QueryTimeoutError`, … | Typed errors with `code` and `statusCode` |
 | HTTP helpers | `mapTelemetryError`, `isTelemetryClientError` | Map errors for APIs |
@@ -51,7 +50,7 @@ npm install @zithara/api-telemetry-lib
 
 ## Configuration
 
-Copy `.env.example` to `.env` when using the library-owned pool (scripts or services without host injection).
+Hosts must call `initializeApiTelemetry` with `{ pool }` or `{ query, runInTransaction }` once at startup.
 
 | Variable | Description |
 | -------- | ----------- |
@@ -98,9 +97,9 @@ psql "$DATABASE_URL" -f sql/indexes-api-call-logs.sql
 
 ## How to use
 
-### 1. Bootstrap (once at startup)
+### 1. Bootstrap (exactly once at startup)
 
-Reuse the host database connection when possible. Do not open a second pool unless the service has no shared pool.
+Call `initializeApiTelemetry` once per process. A second call throws `ConfigurationError`. Reuse the host database connection when possible.
 
 **Native `pg` Pool** (e.g. campaign-backend):
 

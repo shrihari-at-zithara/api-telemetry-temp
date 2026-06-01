@@ -55,6 +55,10 @@ const MESSAGES = Object.freeze({
     poolConnectRequired: () =>
       'initializeApiTelemetry: pool must be a native pg Pool (with connect). For Sequelize, pass { query, runInTransaction } instead of pool.',
     initPoolOrQuery: () => 'initializeApiTelemetry: provide either pool or query, not both',
+    initRequiresPoolOrQuery: () =>
+      'initializeApiTelemetry: provide either { pool } or { query } (and runInTransaction for Sequelize).',
+    alreadyInitialized: () =>
+      'initializeApiTelemetry has already been called. The API telemetry library initializes once per process.',
   },
 });
 

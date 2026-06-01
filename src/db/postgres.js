@@ -1,16 +1,10 @@
 /**
- * PostgreSQL access: optional host-injected pool/query, or lazy env-based pool.
+ * PostgreSQL access via host-injected pool or query (set at initializeApiTelemetry).
  * @module db/postgres
  */
 
-const { Pool } = require('pg');
-const { getPoolConfig } = require('../config');
 const { MESSAGES } = require('../config/messages');
 const { ConfigurationError } = require('../utils/errors');
-const logger = require('../utils/logger');
-
-/** @type {import('pg').Pool | null} */
-let ownedPool = null;
 
 /** @type {import('pg').Pool | null} */
 let externalPool = null;
@@ -60,31 +54,11 @@ function setExternalRunInTransaction(fn) {
  * @returns {import('pg').Pool}
  */
 function getPool() {
-  if (externalPool) {
-    return externalPool;
+  if (!externalPool) {
+    throw new ConfigurationError(MESSAGES.db.poolRequired());
   }
 
-  if (!ownedPool) {
-    const config = getPoolConfig();
-
-    if (!config.connectionString && !config.database) {
-      throw new ConfigurationError(
-        'PostgreSQL is not configured. Call initializeApiTelemetry({ pool }) or set DATABASE_URL / POSTGRES_URI / PGDATABASE.'
-      );
-    }
-
-    ownedPool = new Pool(config);
-
-    ownedPool.on('error', (err) => {
-      logger.error('Unexpected error on idle PostgreSQL client', {
-        error: err.message,
-      });
-    });
-
-    logger.debug('PostgreSQL pool initialized (library-owned)');
-  }
-
-  return ownedPool;
+  return externalPool;
 }
 
 /**
@@ -137,23 +111,9 @@ async function runInTransaction(callback) {
   }
 }
 
-/**
- * Closes only the library-owned pool, never a host-injected pool.
- *
- * @returns {Promise<void>}
- */
-async function closePool() {
-  if (ownedPool) {
-    await ownedPool.end();
-    ownedPool = null;
-    logger.debug('PostgreSQL pool closed');
-  }
-}
-
 module.exports = {
   query,
   getPool,
-  closePool,
   runInTransaction,
   setExternalPool,
   setExternalQuery,
